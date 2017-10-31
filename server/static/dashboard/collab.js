@@ -43,8 +43,8 @@ connection.createFetchQuery('files', { collabid: collabid }, {}, function(err, f
 function updateDiff(node, baseline, text) {
   if (baseline === undefined || text === undefined) { return; }
   node.innerHTML = '';
-  window.diff.diffLines(baseline.trim(), text.trim()).forEach(function(part) {
-    var elt = document.createElement('div');
+  window.diff.diffChars(baseline.trim(), text.trim()).forEach(function(part) {
+    var elt = document.createElement('span');
     elt.classList.add('diff-part');
     if (part.added) {
       elt.classList.add('diff-added');
