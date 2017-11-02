@@ -43,6 +43,25 @@ connection.createFetchQuery('files', { collabid: collabid }, {}, function(err, f
 function updateDiff(node, baseline, text) {
   if (baseline === undefined || text === undefined) { return; }
   node.innerHTML = '';
+
+  var dmp = new window.diffMatchPatch();
+  var parts = dmp.diff_main(baseline.trim(), text.trim());
+  dmp.diff_cleanupSemantic(parts);
+  parts.forEach(function(part) {
+    var elt = document.createElement('span');
+    elt.classList.add('diff-part');
+    if (part[0] == 1) { // Insertion
+      elt.classList.add('diff-added');
+      elt.appendChild(document.createTextNode(part[1]));
+    } else if (part[0] == 0) { // Equality
+      elt.appendChild(document.createTextNode(part[1]));
+    } else { // Deletion
+      elt.classList.add('diff-removed');
+    }
+    node.appendChild(elt);
+  });
+
+  /*
   window.diff.diffChars(baseline.trim(), text.trim()).forEach(function(part) {
     var elt = document.createElement('span');
     elt.classList.add('diff-part');
@@ -56,6 +75,8 @@ function updateDiff(node, baseline, text) {
     }
     node.appendChild(elt);
   });
+  */
+  
   hljs.highlightBlock(node);
 }
 
