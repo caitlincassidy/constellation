@@ -68,6 +68,22 @@ connection.createFetchQuery('files', { collabid: collabid }, {}, function(err, f
     addButtonToHideDeletedCode();
     showFiles(files, updateDiff_visual3, {'threshold': threshold, 'regexes': regexes});
 
+  } else if (visual[0] == '4') {
+    // Visualization 4: total diff and hiding common prefixes
+    // TODO: Duplicate code from visual 1
+
+    // "4threshold=1000" if we want visual 1 with threshold 1000
+    // "4" if we want the default threshold
+    // "4threshold=2" for a threshold of 2, etc.
+    var threshold = null;
+    var beginningOfThreshold = visual.indexOf("threshold=");
+    if (beginningOfThreshold != -1) {
+      threshold = visual.substring(beginningOfThreshold + "threshold=".length);
+    }
+
+    addButtonToHideDeletedCode();
+    showFiles(files, updateDiff_visual4_deletesOnSide, {"threshold": threshold});
+
   } else {
     showFiles(files, updateDiff_basic, {});
   }
@@ -193,7 +209,7 @@ function updateDiff_visual1_deletesOnSide(node, baseline, text, extraArgs) {
 
     // TODO: Revert to old visualization if the window is too small
 
-    addTotalDiffDeletesOnSideDom(diff, node);
+    var divs = addTotalDiffDeletesOnSideDom(diff, node);
 
     // TODO: Add syntax highlighting?
 
@@ -246,8 +262,122 @@ function updateDiff_visual3(node, baseline, text, extraArgs) {
   });
 }
 
+/**
+ * Update the diffs using visual 4.
+ * Visual 4: A total diff view, that includes some code history
+ *   This visual also hides common prefixes between two lines of code for readability.
+ * This visualiation moves the deleted code to the right, keeping only final code on the left.
+ */
+function updateDiff_visual4_deletesOnSide(node, baseline, text, extraArgs) {
+  if (baseline === undefined || text === undefined) { return; }
+
+  var filepath = extraArgs["filepath"];
+  var threshold = extraArgs["threshold"];
+  var url = getAjaxUrlForTotalDiff(filepath, threshold);
+
+  $.ajax(url).done(function(diff) {
+
+    // TODO: Revert to old visualization if the window is too small
+
+    var divs = addTotalDiffDeletesOnSideDom(diff, node);
+    hideCommonPrefixes(divs);
+
+    // TODO: Add syntax highlighting?
+
+  }).fail(function(req, status, err) {
+    list.textContent = 'Error fetching total diff: ' + errorToString(req.responseJSON, status, err);
+  });
+}
+
 //////////////////////////////////
 ///////// HELPER METHODS /////////
+function hideCommonPrefixes(divs) {
+  divs.forEach(function(div) {
+    var children = div.childNodes;
+
+    // Split into individual lines
+    var lines = [];
+    children.forEach(function(child) {
+      var childLines = child.innerText.split('\n');
+      childLines.pop(); // Last one is always empty
+      childLines.forEach(function(childLine) {
+        var singleLine = {
+          'child': child, // We need the child to know what CSS classes to apply
+          'text': childLine
+        }
+        lines.push(singleLine);
+      });
+    });
+
+    // Since we need to add children for the common prefixes,
+    // Store all the children we should have at the end in a new list
+    var newChildNodes = [];
+    var firstLine = getSpanElement(lines[0].child, lines[0].text + '\n');
+    newChildNodes.push(firstLine);
+
+    for (var i = 1; i < lines.length; i++) {
+      // Only consider hiding prefixes if the two lines are both deleted code
+      if (!lines[i]  .child.classList.contains('span-removed') ||
+          !lines[i-1].child.classList.contains('span-removed')) {
+        newChildNodes.push(getSpanElement(lines[i].child, lines[i].text + '\n'));
+        continue;
+      }
+
+      var commonPrefixLength = getCommonPrefixLength(lines[i].text, lines[i-1].text);
+      if (commonPrefixLength > 10) {
+        // Need to change the second child to hide the text in common
+        //   by putting spaces there instead (monospace font => correct behavior)
+  
+        var commonElt = getSpanElement(lines[i].child, Array(commonPrefixLength+1).join(" "));
+        var afterElt = getSpanElement(lines[i].child, lines[i].text.substring(commonPrefixLength) + '\n');
+
+        $(commonElt).addClass('span-removed-common-prefix');
+
+        newChildNodes.push(commonElt);
+        newChildNodes.push(afterElt);
+
+        // TODO: Won't work with regexes
+
+      } else {
+        // Nothing to hide, so add this child like normal
+        newChildNodes.push(getSpanElement(lines[i].child, lines[i].text + '\n'));
+      }
+    }
+
+    // Remove all the old children and add all the new ones
+    while (div.firstChild) {
+      div.removeChild(div.firstChild);
+    }
+
+
+    newChildNodes.forEach(function(child) {
+      div.appendChild(child);
+    });
+  });
+}
+
+/* Gets a span element with the same classes as {child} and with {text} inside it */
+// TODO: better name, method signature
+function getSpanElement(child, text) {
+  var elt = document.createElement('span');
+  elt.appendChild(document.createTextNode(text));
+  $(elt).addClass($(child).attr('class'));
+  return elt;
+}
+
+
+function getCommonPrefixLength(textLine1, textLine2) {
+  var j = 0;
+  while (j < textLine1.length && j < textLine2.length) {
+    if (textLine1.charAt(j) == textLine2.charAt(j)) {
+      j += 1;
+    } else {
+      break;
+    }
+  }
+  return j;
+}
+
 
 /* Given a node containing each line of code and the regexes
  *  to match, update the DOM so that the regexes are
@@ -457,28 +587,32 @@ function addTotalDiffDeletesOnSideDom(diff, node) {
   divDeleted.classList.add('col-xs-6');
 
   diff.forEach(function(part){
-    var elt = document.createElement('span');
+    if (part.value.length > 0) {
+    
+      var elt = document.createElement('span');
 
-    if (part.added) {
-      elt.classList.add('span-added');
-    } else if (part.removed) {
-      elt.classList.add('span-removed');
-      if (part.original) {
+      if (part.added) {
+        elt.classList.add('span-added');
+      } else if (part.removed) {
+        elt.classList.add('span-removed');
+        if (part.original) {
+          elt.classList.add('span-original');
+        }
+      } else {
         elt.classList.add('span-original');
       }
-    } else {
-      elt.classList.add('span-original');
-    }
 
-    elt.appendChild(document.createTextNode(part.value));
-    divNormal.appendChild(elt);
+      elt.appendChild(document.createTextNode(part.value));
+      divNormal.appendChild(elt);
 
-    elt2 = elt.cloneNode(true);
-    divDeleted.appendChild(elt2);
+      elt2 = elt.cloneNode(true);
+      divDeleted.appendChild(elt2);
 
-    if (!showDeletedCode && part.removed) {
-      $(elt).hide();
-      $(elt2).hide();
+      if (!showDeletedCode && part.removed) {
+        $(elt).hide();
+        $(elt2).hide();
+      }
+
     }
 
   });
