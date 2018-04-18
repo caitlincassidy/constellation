@@ -1,6 +1,6 @@
 //use constellation;
 
-print("collabid,milestone,modified,comment,score,grader");
+print("collabid,milestone,modified,grader,score,comment");
 
 var cursor = db.checkoffs.find({
   'project': 'ic13-debugging',
