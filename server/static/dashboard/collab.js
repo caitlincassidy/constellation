@@ -7,6 +7,31 @@ collab.fetch(function(err) {
   document.querySelector('#partners').textContent = collab.data.users.slice().sort().join(' & ')
 });
 
+
+function addRegexToControls(regex, isStaffSuggestion) {
+  var formGroup = document.createElement('div');
+  formGroup.classList.add('form-group');
+  var row = document.createElement('div');
+  row.classList.add('row');
+  formGroup.appendChild(row);
+
+  var label = $("<label>").text(regex);
+  label.addClass('col-xs-9');
+  var checkboxCol = document.createElement('div');
+  checkboxCol.classList.add('col-xs-3');
+  var checkbox = $("<input id='" + regex + "' type='checkbox' checked>");
+  $(checkboxCol).append(checkbox);
+  
+  $(row).append(label);
+  $(row).append(checkboxCol);
+
+  if (isStaffSuggestion) {
+    $(row).css('background', 'yellow');
+  }
+
+  $('#controls-regex').append(formGroup);
+}
+
 connection.createFetchQuery('files', { collabid: collabid }, {}, function(err, files) {
   if (err) { throw err; }
 
@@ -36,7 +61,12 @@ connection.createFetchQuery('files', { collabid: collabid }, {}, function(err, f
     var beginningOfRegexes = visual.indexOf("regexes=");
     if (beginningOfRegexes != -1) {
       regexes = visual.substring(beginningOfRegexes + "regexes=".length);
+      regexes = regexes.split(';;');
     }
+
+    regexes.forEach(function(regex) {
+      addRegexToControls(regex, true);
+    })
 
     showFiles(files, updateDiff_visual2, {"regexes": regexes});
 
@@ -383,13 +413,12 @@ function getCommonPrefixLength(textLine1, textLine2) {
  *  to match, update the DOM so that the regexes are
  *  highlighted in yellow. */
 function addRegexHighlighting(node, regexes) {
-  var regexesSplit = regexes.split(';;');
-  if (regexesSplit.length == 1 && regexesSplit[0] == '') {
+  if (regexes.length == 1 && regexes[0] == '') {
     // No regexes given
     return;
   }
 
-  regexesSplit.forEach(function(regex) {
+  regexes.forEach(function(regex) {
     // 'g' flag means it finds all matches, not just the first one
     var regexp = RegExp(regex, 'g');
     var newChildNodes = [];
