@@ -31,6 +31,54 @@ function hideDeletedCode() {
   $('.div-normal').addClass('col-xs-12');
 }
 
+$("#add-regex").click(function() {
+  var newRegex = $('#new-regex-text').val();
+  $('#new-regex-text').val('');
+
+  addRegexToControls(newRegex);
+  updateFileDisplayWithCurrentRegexes();
+});
+
+function addRegexToControls(regex) {
+  var row = document.createElement('div');
+  row.classList.add('row');
+  row.classList.add('regex-row');
+
+  var label = $("<p>").text(regex);
+  label.addClass('col-xs-10');
+  var checkboxCol = document.createElement('div');
+  checkboxCol.classList.add('col-xs-2');
+  var checkbox = $("<input id='" + regex + "' type='checkbox' checked>");
+  checkbox.addClass('cb-regex');
+  $(checkboxCol).append(checkbox);
+  
+  $(row).append(checkboxCol);
+  $(row).append(label);
+
+  // Text box to add new regexes should always be the bottom
+  $(row).insertBefore($('#add-regex-row'));
+}
+
+function updateFileDisplayWithCurrentRegexes() {
+  // Get currently active regexes
+  var regexes = []
+  $('.cb-regex:checkbox:checked').each(function(index) {
+    var regex = $(this)[0].id;
+    regexes.push(regex);
+  });
+
+  // Re-render each file with new regexes
+  $(".file").each(function(index) {
+    var baseline = $(this).data('baseline');
+    var text = $(this).data('text');
+    updateDiff_visual2(this, baseline, text, {'regexes': regexes});
+  });
+}
+
+$('#controls-regex').on("click", ".cb-regex", function() {
+  updateFileDisplayWithCurrentRegexes();
+});
+
 connection.createFetchQuery('files', { collabid: collabid }, {}, function(err, files) {
   if (err) { throw err; }
 
@@ -59,7 +107,12 @@ connection.createFetchQuery('files', { collabid: collabid }, {}, function(err, f
     var beginningOfRegexes = visual.indexOf("regexes=");
     if (beginningOfRegexes != -1) {
       regexes = visual.substring(beginningOfRegexes + "regexes=".length);
+      regexes = regexes.split(';;');
     }
+
+    regexes.forEach(function(regex) {
+      addRegexToControls(regex);
+    })
 
     showFiles(files, updateDiff_visual2, {"regexes": regexes});
 
@@ -116,16 +169,26 @@ function showFiles(files, updateFunction, extraArgs) {
   files.sort(function(a, b) { return a.data.filepath.localeCompare(b.data.filepath); });
   files.forEach(function(file) {
     var item = document.importNode(document.querySelector('#file').content, true);
+    
     var heading = item.querySelector('h4');
     heading.textContent = file.data.filepath;
     var diff = item.querySelector('.diff code');
     list.appendChild(item);
 
     $.ajax('/baseline/' + project + '/' + file.data.filepath).done(function(baseline) {
+      // Save data for regex updating
+      // TODO: Better way to do this?
+      $(diff).data('baseline', baseline);
+      $(diff).data('text', file.data.text); // TODO: update this data on update
+
       var extraArgsForFile = Object.assign({'filepath': file.data.filepath}, extraArgs);
 
       if (cutoff) {
         $.ajax('/historical/' + project + '/' + collabid + '/' + file.data.filepath + '/' + cutoff).done(function(historical) {
+
+          // Used for regex updating
+          $(diff).data('text', historical.data.text); // TODO: update this data on update
+
           updateFunction(diff, baseline, historical.data ? historical.data.text : undefined, extraArgsForFile);
 
         }).fail(function(req, status, err) {
@@ -397,13 +460,12 @@ function getCommonPrefixLength(textLine1, textLine2) {
  *  to match, update the DOM so that the regexes are
  *  highlighted in yellow. */
 function addRegexHighlighting(node, regexes) {
-  var regexesSplit = regexes.split(';;');
-  if (regexesSplit.length == 1 && regexesSplit[0] == '') {
+  if (regexes.length == 1 && regexes[0] == '') {
     // No regexes given
     return;
   }
 
-  regexesSplit.forEach(function(regex) {
+  regexes.forEach(function(regex) {
     // 'g' flag means it finds all matches, not just the first one
     var regexp = RegExp(regex, 'g');
     var newChildNodes = [];
@@ -637,6 +699,7 @@ function addTotalDiffDeletesOnSideDom(diff, node) {
 function drawNormalDiff(baseline, text, node) {
   if (baseline === undefined || text === undefined) { return; }
   node.innerHTML = '';
+
   window.diff.diffLines(baseline.trim(), text.trim()).forEach(function(part) {
     var elt = document.createElement('div');
     elt.classList.add('diff-part');
