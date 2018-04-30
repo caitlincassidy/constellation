@@ -75,7 +75,7 @@ function updateFileDisplayWithCurrentRegexes() {
   });
 }
 
-$('#controls-regex').on("click", ".cb-regex", function() {
+$('#visual-controls').on("click", ".cb-regex", function() {
   updateFileDisplayWithCurrentRegexes();
 });
 
