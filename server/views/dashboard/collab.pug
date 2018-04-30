@@ -35,11 +35,18 @@ block content
               input(type='radio' name='score')
               | &nbsp;#[span.glyphicon.glyphicon-ok]+
           .col-xs-1: p#grader.form-control-static: i no grader
+
+  if visual[0] == 3 || visual[0] == 1
+    #controls-total-diff.controls.col-xs-12
+      .row
+        .col-xs-2
+          input#cb-deleted-code(type='checkbox')
+        p.col-xs-10 deleted code
   
   #files.row
   
   template#file
-    .col-xs-12: .tile.panel.panel-default: .panel-body
+    .file-column.col-xs-6: .tile.panel.panel-default: .panel-body
       h4
       pre.diff: code.java
   

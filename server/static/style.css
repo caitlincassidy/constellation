@@ -4,10 +4,16 @@ body {
   font-family: 'Rubik', 'Helvetica Neue', Helvetica, Arial, sans-serif;
 }
 
+.container {
+  width: auto;
+  padding-left: 30px;
+  padding-right: 30px;
+}
+
 #user {
   position: absolute;
   top: 10px;
-  right: 10px;
+  left: 10px;
 }
 #user.staff {
   background-color: #6f5499;
@@ -172,6 +178,18 @@ Do this by hiding all normal code. */
   color: rgba(0, 0, 0, 0);
 }
 
+
+/** Controls boxes styling */
+.controls {
+  position: fixed;
+  top: 1em;
+  right: 2em;
+  width: 15%;
+  z-index: 1000;
+  background: white;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+}
 
 /* syntax highlighting with Eclipse colors */
 .hljs,
