@@ -219,10 +219,6 @@ Do this by hiding all normal code. */
   border-bottom: 0.5px solid #ccc;
 }
 
-.staffSuggestion {
-  background: rgba(51, 122, 183, 0.2);
-}
-
 /* syntax highlighting with Eclipse colors */
 .hljs,
 .hljs-subst { color: #333; }
