@@ -511,9 +511,12 @@ function getChunkedDiffs(ops, threshold, baseline) {
     baseDiff.forEach(function(part) {
       // Note: should only be one part
       part.original = true;
+      part.snapshotNumber = 0;
     });
 
     chunkedDiffs.push(baseDiff);
+
+    var snapshotNumber = 1;
 
     /* Apply each op, and calculate a diff if two 
        consecutive ops are far enough apart */
@@ -529,6 +532,10 @@ function getChunkedDiffs(ops, threshold, baseline) {
         if (!(chunkedDiff.length == 1 && 
             !chunkedDiff[0].added &&
             !chunkedDiff[0].removed)) {
+          chunkedDiff.forEach(function(part) {
+            part.snapshotNumber = snapshotNumber;
+          });
+          snapshotNumber += 1;
           chunkedDiffs.push(chunkedDiff);
         }
 
@@ -556,6 +563,9 @@ function getChunkedDiffs(ops, threshold, baseline) {
     if (!(chunkedDiff.length == 1 &&
         !chunkedDiff[0].added &&
         !chunkedDiff[0].removed)) {
+      chunkedDiff.forEach(function(part) {
+        part.snapshotNumber = snapshotNumber;
+      });
       chunkedDiffs.push(chunkedDiff);
     }
 
