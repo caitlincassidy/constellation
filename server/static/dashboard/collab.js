@@ -1,3 +1,6 @@
+/////////////////////////////////////////////
+///////////// GLOBAL VARIABLES //////////////
+
 var connection = new window.sharedb.Connection(new WebSocket(shareURL));
 
 var collab = connection.get('collabs', collabid);
@@ -7,38 +10,53 @@ collab.fetch(function(err) {
   document.querySelector('#partners').textContent = collab.data.users.slice().sort().join(' & ')
 });
 
+// Update function to use (based on which visual is being used)
+var updateFunction;
+
+// Parameters required to use updateFunction
+var parameters;
+
+// Whether deleted code is currently shown or not
+var showDeletedCode = false;
+
+
+
+//////////////////////////////////////
+///////////// MAIN CODE //////////////
+
+/**
+ * Fetch the files for this collab, determine which visual to use,
+ *   and display the files accordingly.
+ */
 connection.createFetchQuery('files', { collabid: collabid }, {}, function(err, files) {
   if (err) { throw err; }
 
-  if (!visual) {
-    showFiles(files, updateDiff_basic, {});
+  updateFunction = updateDiff_basic;
+  parameters = {};
 
-  } else if (visual[0] == '1') {
+  if (visual[0] == '1') {
     // Visual 1 indicates a total diff visualiation
     // "1threshold=1000" if we want visual 1 with threshold 1000
     // "1" if we want the default threshold
     // "1threshold=2" for a threshold of 2, etc.
-    var threshold = null;
-    var beginningOfThreshold = visual.indexOf("threshold=");
-    if (beginningOfThreshold != -1) {
-      threshold = visual.substring(beginningOfThreshold + "threshold=".length);
-    }
 
-    addButtonToHideDeletedCode();
-    showFiles(files, updateDiff_visual1_deletesOnSide, {"threshold": threshold});
+    var threshold = getThresholdFromUrl(visual);
+    parameters["threshold"] = threshold;
+    updateFunction = updateDiff_visual1_deletesOnSide;
 
   } else if (visual[0] == '2') {
     // Visual 2 indicates regexes, and looks like this:
     // "2regexes=Override" searches for ''@Override' in the files
     // "2regexes=@Override;;void;;size" searches for '@Override', 'void', and 'size' in the file
     // "2" searches for nothing
-    var regexes = null;
-    var beginningOfRegexes = visual.indexOf("regexes=");
-    if (beginningOfRegexes != -1) {
-      regexes = visual.substring(beginningOfRegexes + "regexes=".length);
-    }
 
-    showFiles(files, updateDiff_visual2, {"regexes": regexes});
+    var regexes = getRegexesFromUrl(visual);
+    parameters['regexes'] = regexes;
+    updateFunction = updateDiff_visual2;
+
+    regexes.forEach(function(regex) {
+      addRegexToControls(regex);
+    });
 
   } else if (visual[0] == '3') {
     // Visual 3 indicates regexes and total diff view combined
@@ -50,23 +68,15 @@ connection.createFetchQuery('files', { collabid: collabid }, {}, function(err, f
     // Not allowed:
     // "3regexes=Stringthreshold=1000"
 
-    var threshold = null;
-    var regexes = '';
+    var threshold = getThresholdFromUrl(visual);
+    var regexes = getRegexesFromUrl(visual);
+    parameters['threshold'] = threshold;
+    parameters['regexes'] = regexes;
+    updateFunction = updateDiff_visual3;
 
-    var beginningOfRegexes = visual.indexOf("regexes=");
-    var beginningOfThreshold = visual.indexOf("threshold=");
-    if (beginningOfThreshold != -1 && beginningOfRegexes != -1) {
-      threshold = visual.substring(beginningOfThreshold + "threshold=".length, beginningOfRegexes);
-    } else if (beginningOfThreshold != -1) {
-      threshold = visual.substring(beginningOfThreshold + "threshold=".length);
-    }
-
-    if (beginningOfRegexes != -1) {
-      regexes = visual.substring(beginningOfRegexes + "regexes=".length);
-    }
-
-    addButtonToHideDeletedCode();
-    showFiles(files, updateDiff_visual3, {'threshold': threshold, 'regexes': regexes});
+    regexes.forEach(function(regex) {
+      addRegexToControls(regex);
+    });
 
   } else if (visual[0] == '4') {
     // Visualization 4: total diff and hiding common prefixes
@@ -75,49 +85,44 @@ connection.createFetchQuery('files', { collabid: collabid }, {}, function(err, f
     // "4threshold=1000" if we want visual 1 with threshold 1000
     // "4" if we want the default threshold
     // "4threshold=2" for a threshold of 2, etc.
-    var threshold = null;
-    var beginningOfThreshold = visual.indexOf("threshold=");
-    if (beginningOfThreshold != -1) {
-      threshold = visual.substring(beginningOfThreshold + "threshold=".length);
-    }
-
-    addButtonToHideDeletedCode();
-    showFiles(files, updateDiff_visual4_deletesOnSide, {"threshold": threshold});
-
-  } else {
-    showFiles(files, updateDiff_basic, {});
+    
+    var threshold = getThresholdFromUrl(visual);
+    parameters["threshold"] = threshold;
+    updateFunction = updateDiff_visual4_deletesOnSide;
   }
+
+  showFiles(files, updateFunction, parameters);
 });
 
-var showDeletedCode = true;
-
-function addButtonToHideDeletedCode() {
-  $(document).ready(function() {
-    var button = $('<button>Toggle display of deleted code</button>');
-    $(button).insertBefore($("#files"));
-
-    $(button).click(function() {
-      showDeletedCode = !showDeletedCode;
-      $('.span-removed').toggle();
-    });
-  });
-}
-
+/**
+ * Display the files using the provided updateFunction and passing
+ *   extraArgs to that updateFunction.
+ */
 function showFiles(files, updateFunction, extraArgs) {
   var list = document.querySelector('#files');
   files.sort(function(a, b) { return a.data.filepath.localeCompare(b.data.filepath); });
   files.forEach(function(file) {
     var item = document.importNode(document.querySelector('#file').content, true);
+    
     var heading = item.querySelector('h4');
     heading.textContent = file.data.filepath;
     var diff = item.querySelector('.diff code');
     list.appendChild(item);
 
     $.ajax('/baseline/' + project + '/' + file.data.filepath).done(function(baseline) {
+      // Save data for regex updating
+      // TODO: Better way to do this?
+      $(diff).data('baseline', baseline);
+      $(diff).data('text', file.data.text); // TODO: update this data on update
+      $(diff).data('filepath', file.data.filepath);
+
       var extraArgsForFile = Object.assign({'filepath': file.data.filepath}, extraArgs);
 
       if (cutoff) {
         $.ajax('/historical/' + project + '/' + collabid + '/' + file.data.filepath + '/' + cutoff).done(function(historical) {
+
+          // Used for regex updating
+          $(diff).data('text', historical.data.text); // TODO: update this data on update
 
           updateFunction(diff, baseline, historical.data ? historical.data.text : undefined, extraArgsForFile);
 
@@ -140,8 +145,11 @@ function showFiles(files, updateFunction, extraArgs) {
   });
 }
 
-////////////////////////////////////
-///////// UPDATE FUNCTIONS /////////
+
+
+/////////////////////////////////////////////
+///////////// UPDATE FUNCTIONS //////////////
+// Displays DOM differently for different visualizations.
 
 /*
  * Update the diffs for the basic visualization.
@@ -153,6 +161,7 @@ function updateDiff_basic(node, baseline, text, file, extraArgs) {
 /** 
  * Update the diffs using visual 1.
  * Visual 1: A total diff view, that includes some code history
+ * DEPRECATED (updateDiff_visual1_deletesOnSide is preferred)
  */
 function updateDiff_visual1(node, baseline, text, extraArgs) {
   if (baseline === undefined || text === undefined) { return; }
@@ -162,7 +171,6 @@ function updateDiff_visual1(node, baseline, text, extraArgs) {
   var url = getAjaxUrlForTotalDiff(filepath, threshold);
 
   $.ajax(url).done(function(diff) {
-
     diff.forEach(function(part){
       var elt = document.createElement('span');
 
@@ -179,11 +187,6 @@ function updateDiff_visual1(node, baseline, text, extraArgs) {
 
       elt.appendChild(document.createTextNode(part.value));
       node.appendChild(elt);
-
-      if (!showDeletedCode && part.removed) {
-        $(elt).hide();
-      }
-
     });
 
     // TODO: Add syntax highlighting?
@@ -206,10 +209,11 @@ function updateDiff_visual1_deletesOnSide(node, baseline, text, extraArgs) {
   var url = getAjaxUrlForTotalDiff(filepath, threshold);
 
   $.ajax(url).done(function(diff) {
+    addTotalDiffDeletesOnSideDom(diff, node);
 
-    // TODO: Revert to old visualization if the window is too small
-
-    var divs = addTotalDiffDeletesOnSideDom(diff, node);
+    if (!showDeletedCode) {
+      hideDeletedCode();
+    }
 
     // TODO: Add syntax highlighting?
 
@@ -231,7 +235,7 @@ function updateDiff_visual2(node, baseline, text, extraArgs) {
   // However, now only the part of the line with code on it is
   //   highlighted.
 
-  // TODO: Syntax highlighting doesn't work here
+  // TODO: Syntax highlighting
 }
 
 /** 
@@ -247,13 +251,18 @@ function updateDiff_visual3(node, baseline, text, extraArgs) {
   var url = getAjaxUrlForTotalDiff(filepath, threshold);
 
   $.ajax(url).done(function(diff) {
-    // TODO: Revert to old visualization if the window is too small
     var divs = addTotalDiffDeletesOnSideDom(diff, node);
-
     var regexes = extraArgs["regexes"];
     divs.forEach(function(div) {
       addRegexHighlighting(div, regexes);
     });
+
+    if (!showDeletedCode) {
+      hideDeletedCode();
+    }
+
+    // TODO: Bug, after un-checking a regex, it appends the same text
+    //   over and over so there's 6 filetexts in a row
 
     // TODO: Add syntax highlighting?
 
@@ -264,9 +273,8 @@ function updateDiff_visual3(node, baseline, text, extraArgs) {
 
 /**
  * Update the diffs using visual 4.
- * Visual 4: A total diff view, that includes some code history
+ * Visual 4: A total diff view, that includes some code history (visual 1)
  *   This visual also hides common prefixes between two lines of code for readability.
- * This visualiation moves the deleted code to the right, keeping only final code on the left.
  */
 function updateDiff_visual4_deletesOnSide(node, baseline, text, extraArgs) {
   if (baseline === undefined || text === undefined) { return; }
@@ -276,11 +284,12 @@ function updateDiff_visual4_deletesOnSide(node, baseline, text, extraArgs) {
   var url = getAjaxUrlForTotalDiff(filepath, threshold);
 
   $.ajax(url).done(function(diff) {
-
-    // TODO: Revert to old visualization if the window is too small
-
     var divs = addTotalDiffDeletesOnSideDom(diff, node);
-    hideCommonPrefixes(divs);
+    divs.forEach(function(div) {
+      hideCommonPrefixes(div);
+    });
+
+    // TODO: deleted code toggle doesn't work with visual 4
 
     // TODO: Add syntax highlighting?
 
@@ -289,83 +298,124 @@ function updateDiff_visual4_deletesOnSide(node, baseline, text, extraArgs) {
   });
 }
 
-//////////////////////////////////
-///////// HELPER METHODS /////////
-function hideCommonPrefixes(divs) {
-  divs.forEach(function(div) {
-    var children = div.childNodes;
-
-    // Split into individual lines
-    var lines = [];
-    children.forEach(function(child) {
-      var childLines = child.innerText.split('\n');
-      childLines.pop(); // Last one is always empty
-      childLines.forEach(function(childLine) {
-        var singleLine = {
-          'child': child, // We need the child to know what CSS classes to apply
-          'text': childLine
-        }
-        lines.push(singleLine);
-      });
-    });
-
-    // Since we need to add children for the common prefixes,
-    // Store all the children we should have at the end in a new list
-    var newChildNodes = [];
-    var firstLine = getSpanElement(lines[0].child, lines[0].text + '\n');
-    newChildNodes.push(firstLine);
-
-    for (var i = 1; i < lines.length; i++) {
-      // Only consider hiding prefixes if the two lines are both deleted code
-      if (!lines[i]  .child.classList.contains('span-removed') ||
-          !lines[i-1].child.classList.contains('span-removed')) {
-        newChildNodes.push(getSpanElement(lines[i].child, lines[i].text + '\n'));
-        continue;
-      }
-
-      var commonPrefixLength = getCommonPrefixLength(lines[i].text, lines[i-1].text);
-      if (commonPrefixLength > 10) {
-        // Need to change the second child to hide the text in common
-        //   by putting spaces there instead (monospace font => correct behavior)
-  
-        var commonElt = getSpanElement(lines[i].child, Array(commonPrefixLength+1).join(" "));
-        var afterElt = getSpanElement(lines[i].child, lines[i].text.substring(commonPrefixLength) + '\n');
-
-        $(commonElt).addClass('span-removed-common-prefix');
-
-        newChildNodes.push(commonElt);
-        newChildNodes.push(afterElt);
-
-        // TODO: Won't work with regexes
-
-      } else {
-        // Nothing to hide, so add this child like normal
-        newChildNodes.push(getSpanElement(lines[i].child, lines[i].text + '\n'));
-      }
-    }
-
-    // Remove all the old children and add all the new ones
-    while (div.firstChild) {
-      div.removeChild(div.firstChild);
-    }
 
 
-    newChildNodes.forEach(function(child) {
-      div.appendChild(child);
-    });
-  });
+/////////////////////////////////////////////
+///////////// HELPER FUNCTIONS //////////////
+
+/**
+ * Get the regexes value from the given URL string.
+ * Returns the regexes as a list.
+ */
+function getRegexesFromUrl(url) {
+  var regexes = '';
+  var beginningOfRegexes = url.indexOf("regexes=");
+  if (beginningOfRegexes != -1) {
+    regexes = url.substring(beginningOfRegexes + "regexes=".length);
+  }
+
+  // The URL can have both threshold= and regexes=, so need to filter that out
+  if (regexes.indexOf("threshold=") != -1) {
+    regexes = regexes.substring(0, regexes.indexOf("threshold="));
+  }
+
+  regexes = regexes.split(';;');
+  return regexes;
 }
 
-/* Gets a span element with the same classes as {child} and with {text} inside it */
-// TODO: better name, method signature
-function getSpanElement(child, text) {
+/**
+ * Get the threshold value from the given URL string
+ */
+function getThresholdFromUrl(url) {
+  var threshold = null;
+  var beginningOfThreshold = url.indexOf("threshold=");
+  if (beginningOfThreshold != -1) {
+    threshold = url.substring(beginningOfThreshold + "threshold=".length);
+  }
+
+  // The URL can have both threshold= and regexes=, so need to filter that out
+  if (threshold && threshold.indexOf("regexes=") != -1) {
+    threshold = threshold.substring(0, threshold.indexOf("regexes="));
+  }
+
+  return threshold;
+}
+
+/**
+ * Given a div with lines of text, hide common prefixes between
+ *   every two consecutive lines.
+ * If a common prefix is found, that text is removed from the second line.
+ */
+function hideCommonPrefixes(div) {
+  var children = div.childNodes;
+
+  // Split into individual lines
+  var lines = [];
+  children.forEach(function(child) {
+    var childLines = child.innerText.split('\n');
+    childLines.pop(); // Last one is always empty
+    childLines.forEach(function(childLine) {
+      var singleLine = {
+        'child': child, // We need the child to know what CSS classes to apply
+        'text': childLine
+      }
+      lines.push(singleLine);
+    });
+  });
+
+  // Since we need to add children for the common prefixes,
+  // Store all the children we should have at the end in a new list
+  var newChildNodes = [];
+  var firstLine = createSpanElement(lines[0].text + '\n', lines[0].child);
+  newChildNodes.push(firstLine);
+
+  for (var i = 1; i < lines.length; i++) {
+    // Only consider hiding prefixes if the two lines are both deleted code
+    if (!lines[i]  .child.classList.contains('span-removed') ||
+        !lines[i-1].child.classList.contains('span-removed')) {
+      newChildNodes.push(createSpanElement(lines[i].text + '\n', lines[i].child));
+      continue;
+    }
+
+    var commonPrefixLength = getCommonPrefixLength(lines[i].text, lines[i-1].text);
+    if (commonPrefixLength > 10) {
+      // Need to change the second child to hide the text in common
+      //   by putting spaces there instead (monospace font => correct behavior)
+
+      var commonElt = createSpanElement(Array(commonPrefixLength+1).join(" "), lines[i].child);
+      var afterElt = createSpanElement(lines[i].text.substring(commonPrefixLength) + '\n', lines[i].child);
+
+      $(commonElt).addClass('span-removed-common-prefix');
+
+      newChildNodes.push(commonElt);
+      newChildNodes.push(afterElt);
+
+      // TODO: Won't work with regexes
+
+    } else {
+      // There is no common prefix, so add this child like normal
+      newChildNodes.push(createSpanElement(lines[i].text + '\n', lines[i].child));
+    }
+  }
+
+  replaceChildren(div, newChildNodes);
+}
+
+/**
+ * Creates a span element with {text} as its text and with
+ * the same classes as {child}.
+ */
+function createSpanElement(text, child) {
   var elt = document.createElement('span');
   elt.appendChild(document.createTextNode(text));
   $(elt).addClass($(child).attr('class'));
   return elt;
 }
 
-
+/**
+ * Gets the length of the common prefix between textLine1 and textLine2.
+ * For example, getCommonPrefixLength("hello", "here") = 2.
+ */
 function getCommonPrefixLength(textLine1, textLine2) {
   var j = 0;
   while (j < textLine1.length && j < textLine2.length) {
@@ -378,122 +428,127 @@ function getCommonPrefixLength(textLine1, textLine2) {
   return j;
 }
 
-
-/* Given a node containing each line of code and the regexes
- *  to match, update the DOM so that the regexes are
- *  highlighted in yellow. */
+/**
+ * Given a node containing lines of code and regexes
+ *  to find withing that code, update the DOM so that
+ *  the regexes are highlighted in yellow.
+ */
 function addRegexHighlighting(node, regexes) {
-  // A node's children are spans, each of which contain text
-  node.childNodes.forEach(function(child) {
-    var childText = child.innerText;
-    var ajaxRequestUrl = encodeURI('/regex/' + regexes);
-    $.ajax({
-      url: ajaxRequestUrl,
-      type: 'POST',
-      data: JSON.stringify({'text': childText}),
-      contentType: 'application/json',
-      success: function(regexesJson) {
-        // Map from line number to a list of regex matches on that line number
-        var regexesMap = new Map(JSON.parse(regexesJson));
-        addRegexHighlighting_success(child, regexesMap);
-      },
-      error: function(req, status, err) {
-        console.log("got regex error: " + err);
-      }
-    });
-  });
-}
-
-/** Adds regex highlighting to DOM on a successful ajax call. */
-function addRegexHighlighting_success(elt, regexesMap) {
-  // Don't highlight regexes on original code
-  if ($(elt).hasClass('span-original') || $(elt).hasClass('diff-original')) {
+  if (regexes.length == 1 && regexes[0] == '') {
+    // No regexes given
     return;
   }
 
-  var eltText = elt.innerText;
-  var partLines = eltText.split('\n');
-  // Last one is always an empty string
-  partLines.pop();
+  regexes.forEach(function(regex) {
+    // Since we need to add children for the common prefixes,
+    // Store all the children we should have at the end in a new list
+    var newChildNodes = [];
 
-  // Empty elt so that we can add back each line individually
-  elt.innerText = "";
+    node.childNodes.forEach(function(child) {
+      var foundRegexes = [];
+      var stringToCheck = child.innerText;
 
-  // Go through the lines in the part and highlight the regex(es)
-  for (var lineNumber = 1; lineNumber < partLines.length + 1; lineNumber++) {
-    var partLine = partLines[lineNumber - 1];
+      // 'g' flag means it finds all matches, not just the first one
+      var regexFinder = RegExp(regex, 'g');
+      var myArray; // Used to store the results from the regexFinder
 
-    if (regexesMap.has(lineNumber)) {
-      var endOfLastRegex = 0;
+      // Find all the regex matches
+      while ((myArray = regexFinder.exec(stringToCheck)) !== null) {
+        var regexLocation = {
+          'indexInLine': myArray['index'],
+          'length': myArray[0].length,
+        };
+        foundRegexes.push(regexLocation);
+      }
 
-      // Sort by indexInLine so that {endOfLastRegex} only increases
-      regexesMap.get(lineNumber).sort(function(a, b) {
-        return a.indexInLine - b.indexInLine;
-      });
+      // Create the new children based on the found regexes and store them
+      var newChildren = addRegexHighlightingWithinElement(child, foundRegexes);
+      newChildNodes = newChildNodes.concat(newChildren);
+    });
 
-      regexesMap.get(lineNumber).forEach(function(match) {
-        if (endOfLastRegex > match.indexInLine) {
-          // The regexes overlapped (e.g. 'Stream' and 'a')
-          // Ignore this regex
-          // TODO: Better handling of this case? Probably won't happen that much?
-          return;
-        }
+    replaceChildren(node, newChildNodes);
 
-        // Create and append HTML elements
-        var beforeRegexElt = document.createElement('span');
-        var regexElt = document.createElement('span');
-        var afterRegexElt = document.createElement('span');
-
-        beforeRegexElt.appendChild(document.createTextNode(
-          partLine.substring(endOfLastRegex, match.indexInLine)));
-        regexElt.appendChild(document.createTextNode(
-          partLine.substring(match.indexInLine, match.indexInLine + match.length)));
-        afterRegexElt.appendChild(document.createTextNode(
-          partLine.substring(match.indexInLine + match.length)));
-
-        regexElt.classList.add('diff-regex');
-
-        // Ensures that these spans still follow the same CSS rules
-        // as their parent
-        $(beforeRegexElt).addClass($(elt).attr('class'));
-        $(regexElt).addClass($(elt).attr('class'));
-        $(afterRegexElt).addClass($(elt).attr('class'));
-
-        if (endOfLastRegex > 0) {
-          // Need to remove the last child, since this the three elts
-          // created here represent the same characters as the last child
-          elt.removeChild(elt.lastChild);
-        }
-
-        elt.appendChild(beforeRegexElt);
-        elt.appendChild(regexElt);
-        elt.appendChild(afterRegexElt);
-
-        // Increment index of last regex so we know where to split
-        // if there's another regex earlier in the line
-        endOfLastRegex = match.indexInLine + match.length;
-      });
-
-      // Add newline back in for correct syntax highlighting
-      elt.lastChild.appendChild(document.createTextNode('\n'));
-
-    } else {
-      // No regex match, so just put the line back in as normal
-      // Add newline back in for correct syntax highlighting
-
-      var newElt = document.createElement('span');
-      $(newElt).addClass($(elt).attr('class'));
-      newElt.appendChild(document.createTextNode(partLine + '\n'));
-      elt.appendChild(newElt);
-    }
-  }
-
-  // Remove styling from elt so that the colors don't appear twice
-  elt.className = '';
+  });
 }
 
-/** Gets the ajax URL needed if you want to get the total diff
-      for the given filepath */
+/**
+ * Given an element and the locations of matching regexes within that
+ *   element, returns a list of elements that highlight those regexes
+ *   at the given locations.
+ */
+function addRegexHighlightingWithinElement(elt, regexesLocations) {
+  // Don't highlight regexes on original code
+  if ($(elt).hasClass('span-original') || $(elt).hasClass('diff-original')) {
+    return [elt];
+  }
+
+  if (regexesLocations.length == 0) {
+    return [elt];
+  }
+
+  var classesToAdd = $(elt).attr('class');
+  var newElts = [];
+  var endOfLastRegex = 0;
+  var text = elt.innerText;
+
+  regexesLocations.forEach(function(match) {
+    var beforeRegexElt = document.createElement('span');
+    var regexElt = document.createElement('span');
+    var afterRegexElt = document.createElement('span');
+
+    // Ensures that these spans still follow the same CSS rules
+    // as the original
+    $(beforeRegexElt).addClass(classesToAdd);
+    $(regexElt).addClass(classesToAdd);
+    $(afterRegexElt).addClass(classesToAdd);
+
+    regexElt.classList.add('diff-regex');
+
+    beforeRegexElt.appendChild(document.createTextNode(
+      text.substring(endOfLastRegex, match.indexInLine)));
+    regexElt.appendChild(document.createTextNode(
+      text.substring(match.indexInLine, match.indexInLine + match.length)));
+    afterRegexElt.appendChild(document.createTextNode(
+      text.substring(match.indexInLine + match.length)));
+
+    if (endOfLastRegex > 0) {
+      // Need to remove the last child, since the three elts
+      // created here represent the same characters as the last child
+      newElts.pop();
+    }
+
+    newElts.push(beforeRegexElt);
+    newElts.push(regexElt);
+    newElts.push(afterRegexElt);
+
+    // Increment index of last regex so we know where to split
+    // if there's another regex in the element
+    endOfLastRegex = match.indexInLine + match.length;
+
+  });
+
+  return newElts;
+}
+
+/**
+ * Replace {node}'s current children with the children
+ *   in {newChildNodes}.
+ */
+function replaceChildren(node, newChildNodes) {
+  // Remove the old children
+  while (node.firstChild) {
+    node.removeChild(node.firstChild);
+  }
+  // Add the new children
+  newChildNodes.forEach(function(child) {
+    node.appendChild(child);
+  });
+}
+
+/**
+ * Get the Ajax URL that returns the total diff for {filepath}
+ *   using {threshold}.
+ */
 function getAjaxUrlForTotalDiff(filepath, threshold) {
   var url = '/ops/' + project + '/' + collabid + '/' + filepath
     + (cutoff ? '?cutoff=' + cutoff : '')
@@ -503,7 +558,12 @@ function getAjaxUrlForTotalDiff(filepath, threshold) {
   return url;
 }
 
-/** Adds the DOM used for visual1_deletesOnSide */
+/**
+ * Creates and returns the DOM for a total diff visualization
+ *   where the deleted code is shown on the right.
+ *   (for visual1_deletesOnSide).
+ * Adds that DOM inside {node}.
+ */
 function addTotalDiffDeletesOnSideDom(diff, node) {
   var divNormal = document.createElement('div');
   divNormal.classList.add('div-normal');
@@ -512,7 +572,7 @@ function addTotalDiffDeletesOnSideDom(diff, node) {
   divDeleted.classList.add('div-deleted');
   divDeleted.classList.add('col-xs-6');
 
-  diff.forEach(function(part){
+  diff.forEach(function(part) {
     if (part.value.length > 0) {
     
       var elt = document.createElement('span');
@@ -533,12 +593,6 @@ function addTotalDiffDeletesOnSideDom(diff, node) {
 
       elt2 = elt.cloneNode(true);
       divDeleted.appendChild(elt2);
-
-      if (!showDeletedCode && part.removed) {
-        $(elt).hide();
-        $(elt2).hide();
-      }
-
     }
 
   });
@@ -555,6 +609,7 @@ function addTotalDiffDeletesOnSideDom(diff, node) {
 function drawNormalDiff(baseline, text, node) {
   if (baseline === undefined || text === undefined) { return; }
   node.innerHTML = '';
+
   window.diff.diffLines(baseline.trim(), text.trim()).forEach(function(part) {
     var elt = document.createElement('div');
     elt.classList.add('diff-part');
@@ -574,6 +629,98 @@ function drawNormalDiff(baseline, text, node) {
 }
 
 
+/**
+ * Convert an error to a string.
+ */
 function errorToString(json, status, err) {
   return (json && json.code || status) + ' ' + (json && json.message || err);
 }
+
+/**
+ * Hide all DOM with deleted code.
+ */
+function hideDeletedCode() {
+  $('.span-removed').hide();
+  $('.div-deleted').hide();
+  $('.div-normal').removeClass('col-xs-6');
+  $('.div-normal').addClass('col-xs-12');
+}
+
+/**
+ * Add the given regex to the controls box DOM.
+ */
+function addRegexToControls(regex) {
+  if (regex == '') { return; }
+
+  var row = document.createElement('div');
+  row.classList.add('row');
+  row.classList.add('regex-row');
+
+  var label = $("<p>").text(regex);
+  label.addClass('col-xs-10');
+  var checkboxCol = document.createElement('div');
+  checkboxCol.classList.add('col-xs-2');
+  var checkbox = $("<input id='" + regex + "' type='checkbox' checked>");
+  checkbox.addClass('cb-regex');
+  $(checkboxCol).append(checkbox);
+  
+  $(row).append(checkboxCol);
+  $(row).append(label);
+
+  // Text box to add new regexes should always be the bottom
+  $(row).insertBefore($('#add-regex-row'));
+}
+
+/**
+ * Update the file display based on what regexes are currently selected.
+ */
+function updateFileDisplayWithCurrentRegexes() {
+  // Get currently active regexes
+  var regexes = []
+  $('.cb-regex:checkbox:checked').each(function(index) {
+    var regex = $(this)[0].id;
+    regexes.push(regex);
+  });
+
+  // Re-render each file with new regexes
+  $(".file").each(function(index) {
+    var baseline = $(this).data('baseline');
+    var text = $(this).data('text');
+    var filepath = $(this).data('filepath');
+    // TODO: Change the parameters val, rather than passing in regexes again?
+    updateFunction(this, baseline, text, {'regexes': regexes, 'filepath': filepath});
+  });
+}
+
+
+
+///////////////////////////////////////////
+///////////// EVENT HANDLERS //////////////
+
+/* Toggle whether deleted code is displayed or not */
+$("#cb-deleted-code").click(function() {
+  showDeletedCode = !showDeletedCode;
+  $('.span-removed').toggle();
+  $('.div-deleted').toggle();
+
+  if (showDeletedCode) {
+    $('.div-normal').removeClass('col-xs-12');
+    $('.div-normal').addClass('col-xs-6');
+  } else {
+    $('.div-normal').removeClass('col-xs-6');
+    $('.div-normal').addClass('col-xs-12');
+  }
+});
+
+/* Add the user-typed regex to the list and update the display */
+$("#add-regex").click(function() {
+  var newRegex = $('#new-regex-text').val();
+  $('#new-regex-text').val('');
+  addRegexToControls(newRegex);
+  updateFileDisplayWithCurrentRegexes();
+});
+
+/* When a regex is checked or un-checked, update the display */
+$('#visual-controls').on("click", ".cb-regex", function() {
+  updateFileDisplayWithCurrentRegexes();
+});
