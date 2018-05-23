@@ -11,6 +11,7 @@ collabs.on('insert', insertCollabs);
 
 function insertCollabs(collabs, atIndex) {
   var list = document.querySelector('#collabs');
+
   collabs.forEach(function(collab, idx) {
     var item = document.importNode(document.querySelector('#collab').content, true);
     var root = item.querySelector('.collab');
@@ -18,12 +19,20 @@ function insertCollabs(collabs, atIndex) {
     let users = collab.data.users.slice().sort();
     root.dataset.users = users.join(',');
     var link = item.querySelector('a');
-    var href = '/dashboard/' + project + '/' + collab.id + (milestone ? '/m/' + milestone : '') + (cutoff ? '/' + cutoff : '');
+    var href = '/dashboard/' + project + '/' + collab.id
+      + (milestone ? '/m/' + milestone : '')
+      + (cutoff ? '/' + cutoff : '')
+      + (deletedCode ? '?deletedCode=' + deletedCode : '')
+      + (regexes ? '?regexes=' + regexes : '')
+      + (hideCommonPrefix ? '?hideCommonPrefix=' + hideCommonPrefix : '');
+      // TODO: This might not be right
+    // TODO: Persist visual parameters when going from specific
+    //   checkoff back to dashboard
     link.setAttribute('href', href);
     link.textContent = users.join('\n');
     list.insertBefore(item, list.children[atIndex + idx]);
   });
-  
+
   deduplicate();
 }
 
